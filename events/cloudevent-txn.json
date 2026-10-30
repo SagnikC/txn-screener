@@ -1,0 +1,8 @@
+{
+  "specversion": "1.0",
+  "type": "vayu.txn.created",
+  "source": "/upi/switch",
+  "id": "evt-0001",
+  "datacontenttype": "application/json",
+  "data": {"txn_id": "T-0101", "amount": 72000, "vpa": "merchant@okaxis"}
+}
