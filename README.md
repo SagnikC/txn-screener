@@ -1,30 +1,36 @@
 # txn-screener — Vayu Functions demo
 
-Sample function for the **Vayu Functions Demo and Test Runbook**. It scores a UPI-style payment as `LOW` or `HIGH` risk against a threshold, the use case in runbook section 0 (a bank's UPI team screening every transaction).
+Sample function for the **Vayu Functions Demo and Test Runbook**. It scores a UPI-style payment as `LOW` or `HIGH` risk against a threshold (runbook section 0: a bank's UPI team screening every transaction).
 
-The same code is deployed through all four Vayu Functions upload options, so results line up across them.
+The function follows the [Knative Functions Python HTTP template](https://github.com/knative/func/blob/main/docs/function-templates/python.md): a `function/` package exporting `new()`, which returns a `Function` with an async `handle(scope, receive, send)`.
 
-| Option | What to use from this repo |
+## Layout
+
+```text
+txn-screener/
+├── func.yaml            # function config (name, runtime)
+├── pyproject.toml       # package "function" + dependencies
+├── function/
+│   ├── __init__.py      # exports new()
+│   ├── func.py          # Function class: handle, start, stop, alive, ready
+│   └── screener.py      # business logic, no HTTP code
+├── tests/test_func.py   # pytest, template style
+├── events/              # saved test events (runbook D17)
+├── container/           # U4 only: Flask app + Dockerfile
+└── node/                # Node.js variant (second-runtime check)
+```
+
+## Deploy settings (Vayu Functions console)
+
+| Field | Value |
 | --- | --- |
-| U1 GitHub (external) | Push this repo; point the function at branch `main`, folder `/` |
-| U2 Vayu GitLab | Push this repo to `demo/txn-screener`; same settings |
-| U3 Zip file | Run `make-zip.sh` and upload `txn-screener-u3-py.zip` |
-| U4 Vayu Container Registry | `docker build` with the `Dockerfile`, push, deploy by digest |
+| Branch | `main` |
+| Source directory | `/` (repo root) |
+| Runtime | Python 3.11 (or nearest) |
+| Function name | `txn-screener-u1-py` (GitHub), `-u2-py` (Vayu GitLab), `-u3-py` (zip), `-u4-py` (registry) |
+| Min / max replicas | `0` / `5` |
 
-## Files
-
-| Path | Purpose |
-| --- | --- |
-| `screener.py` | The logic. Standard library only |
-| `handler.py` | Function entry point for U1–U3 (`handle(body, query)`, plus an ASGI `new()` form) |
-| `requirements.txt` | Function dependencies (empty for v1) |
-| `app.py`, `Dockerfile`, `requirements-container.txt` | U4 container image (Flask + gunicorn on port 8080) |
-| `events/` | Saved test events for runbook test D17 |
-| `tests/` | Unit tests (`pytest`) |
-| `node/` | Node.js variant for the second-runtime check (U3 step 7) |
-| `make-zip.sh` | Builds the U3 zip with files at the archive root |
-
-> The exact handler file name and signature Vayu Functions expects is open item 2 in the runbook. If the console's Python template generates a different handler, keep `screener.py` and call `screen()` from it.
+If the console rejects `func.yaml` (for example a spec-version error), delete it and redeploy; the platform generates its own.
 
 ## Configuration
 
@@ -32,37 +38,45 @@ The same code is deployed through all four Vayu Functions upload options, so res
 | --- | --- | --- |
 | `RISK_THRESHOLD` | `50000` | Amounts at or above this are `HIGH` |
 | `APP_VERSION` | `v1` | Shown in responses; used for version and traffic-split tests |
-| `PARTNER_API_KEY` | unset | Link to Vayu Vault secret `demo/partner-api-key` in test D6. Only `secret_loaded: true/false` is ever returned |
+| `PARTNER_API_KEY` | unset | Link to Vayu Vault secret `demo/partner-api-key` (test D6). Only `secret_loaded: true/false` is returned |
+
+Variables are read from the `cfg` dict passed to `start()`, as the template recommends.
 
 ## Test behaviour (query parameters)
 
 | Parameter | Effect | Runbook test |
 | --- | --- | --- |
-| `fail=1` | Returns HTTP 500 | D2 |
-| `sleep_ms=N` | Waits N ms | D3, D5 |
+| `fail=1` | HTTP 500 | D2 |
+| `sleep_ms=N` | Non-blocking wait of N ms | D3, D5 |
 | `alloc_mb=N` | Allocates N MB | D4 |
 | `egress=1` | Returns the outbound IP | D12 |
+
+Health probes: `/health/liveness`, `/health/readiness`.
 
 ## Run locally
 
 ```bash
-pip install pytest && python -m pytest -q          # unit tests
+pip install -e .            # installs the package and test dependencies
+python -m pytest -q         # 12 tests
 
-pip install -r requirements-container.txt
-python app.py                                       # http://localhost:8080
+# With the Knative func CLI, if installed:
+func run --builder=host
 curl -s -X POST localhost:8080 -H 'Content-Type: application/json' -d @events/high-risk.json
 ```
 
-## Push to GitHub (U1)
+## Upload option U3: zip
 
 ```bash
-git init && git add . && git commit -m "txn-screener v1"
-git branch -M main
-git remote add origin https://github.com/<org>/txn-screener.git
-git push -u origin main
+zip -r txn-screener-u3-py.zip func.yaml pyproject.toml README.md function
+unzip -l txn-screener-u3-py.zip     # files must sit at the archive root
 ```
 
-Then in GitHub create a fine-grained token for this repository only, with **Contents: Read-only**, and paste it into the Vayu Functions console (runbook section 4.1).
+## Upload option U4: container image
+
+```bash
+docker build -f container/Dockerfile -t <registry host>/demo/txn-screener:1.0.0 .
+docker push <registry host>/demo/txn-screener:1.0.0
+```
 
 ## Fire the test events (D17 fallback)
 
@@ -84,6 +98,6 @@ done
 | `empty` | 200, `LOW`, `txn_id` null |
 | `gitlab-push` | 200 (send with header `X-Gitlab-Event: Push Hook`) |
 
-`kafka-record` and `cron-tick` events are not included: copy their exact shapes from the D9 logs, because they depend on how Vayu Functions wraps those triggers.
+`kafka-record` and `cron-tick` are not included: copy their shapes from the D9 logs.
 
 Internal demo material; not for customer distribution as-is.
